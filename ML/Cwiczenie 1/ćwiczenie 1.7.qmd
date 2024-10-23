@@ -2,7 +2,21 @@
 title: "Ćwiczenie 1.7"
 author: "Kacper Telesz"
 format: html
+editor_options: 
+  chunk_output_type: console
 ---
+
+MRZ - uwagi jak w pierwszym pliku. 
+MRZ- dokument się nie renderuje do html, bo np. nie ma nigdzie wczytanych pakietów 
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(dotwhisker)
+tidymodels_prefer()
+
+```
+
 
 ## Przygotowanie zbioru danych 'airquality':
 
@@ -99,16 +113,21 @@ lm_pred <-
 
 # WYkres danych
 
+```
+
+Za dużo danych na jednym wykresie. Trochę to poprawiłem, ale opisy wykresu  i opis wyników też są potrzben, nikt nie zrozumie co zrobiłeś i po co. 
+
+```{r}
 lm_pred |>
   ggplot(aes(x = temp,
-             y = .pred)) +
-  geom_point() +
+             y = .pred, color = factor(wind))) +
+  geom_point(position = position_dodge(width = 5)) +
   geom_errorbar(aes(ymin = .pred_lower,
                     ymax = .pred_upper),
-                width = 0.2) +
+                width = 0.2, 
+                position = position_dodge(width = 5)) +
   facet_wrap(~ solar.r) +
   theme_bw() +
   labs(y = "air")
 ```
-
 

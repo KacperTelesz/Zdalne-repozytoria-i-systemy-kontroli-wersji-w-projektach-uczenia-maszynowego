@@ -2,9 +2,19 @@
 title: "ćwiczenia do 1.6"
 author: "Kacper Telesz"
 format: html
+editor_options: 
+  chunk_output_type: console
 ---
 
-## 1.1Wprowadzenie
+**MRZ:** YAML do edycji całkowitej zgodnie z wysłanym przykładem na teams. Przy renderowaniu tworzy się masa niepotrzebnych plików. 
+
+**MRZ:** Nie ma nigdzie stosowanych ustawień wyświetlania w chunck
+
+`.gitignore` - poprawiłem, barka najważniejszych rzeczy. Nie zastosowano wysłanego wzorca. 
+
+**MRZ** to są ćwiczenia, a nie rozwiązania tutaj. Nie rozumiem. Idę do 2 pliku.  
+
+## 1.1 Wprowadzenie
 
 
 ```{r}
