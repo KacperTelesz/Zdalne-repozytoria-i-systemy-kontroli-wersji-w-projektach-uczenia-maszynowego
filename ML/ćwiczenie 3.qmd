@@ -1,0 +1,322 @@
+--- 
+title: "Ćwiczenie 2.7"
+author: "Kacper Telesz"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: 'Spis Treści'
+    number-sections: true
+    number-depth: 2
+    embed-resources: true
+    html-math-method: mathjax
+    code-tools: true
+    code-block-bg: true
+    code-fold: show
+    code-summary: "Pokaż/ukryj kod"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    citation: true
+    theme: 
+        dark: superhero
+        light: celurean
+    fontsize: 1.1em               
+    linestretch: 1.4
+    
+    highlight-style: dracula
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+---
+
+
+## Insertowanie bibliotek
+
+```{r}
+library(tidymodels) 
+library(skimr) 
+library(GGally) 
+library(openair) 
+library(ranger)
+library(modeldata)
+tidymodels_prefer()
+```
+
+## Wczytywanie danych
+
+```{r}
+air <- mydata |> selectByDate(year = 1999) 
+air |> skim()
+```
+
+## Usuwanie brakujących danych
+
+```{r}
+air <- air |> na.omit()
+```
+
+## Współczynniki korelacji
+```{r}
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggpairs()
+```
+## Wykres regresji liniowej do sprawdzania danych
+```{r}
+library(ggpubr)
+# wykres regresji liniowej, do sprawdzenia danych 
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggplot(aes(nox, no2)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T, formula = y ~ x) + 
+  stat_cor(label.x = 10, label.y = 80) + 
+  stat_regline_equation(label.x = 10, label.y = 82) +
+  theme_bw()
+```
+
+## Stężenie ozonu na przestrzeni roku 
+```{r}
+air |>    
+  ggplot(aes(date, o3)) +     
+  geom_line() +     
+  theme_bw()
+```
+## Przekształcanie zmiennej ozon z jakościowej na ilościową
+
+```{r}
+air |>    
+  ggplot(aes(date, o3)) +     
+  geom_line() +     
+  theme_bw()
+```
+
+```{r}
+air <-
+  air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  ))
+```
+Sprawdzenie: 
+```{r}
+air |> count(ozone)
+```
+## Podział na zbiór uczący i testowy 
+
+```{r}
+set.seed(222)
+data_split <- initial_split(data = air, prop = 3/4)
+train_data <- training(data_split)
+test_data <-  testing(data_split)
+```
+
+## Tworzenie receptury i modyfikacja zmiennych
+```{r}
+ozone_rec <-
+  recipe(ozone ~ ., data = train_data) |>
+  update_role(date, wd, pm10, pm25, so2, co,o3,ws,nox, new_role = "ID") |>
+  step_BoxCox(no2) |>
+  step_date(date, features = c("month")) |>
+  
+  step_dummy(all_nominal_predictors()) |>
+  step_zv()
+```
+
+```{r}
+ozone_rec |> summary()
+ozone_rec |> prep()
+```
+## Trenowanie modelu z recepturą
+
+### Tworzenie modelu
+```{r}
+lr_mod <- 
+  logistic_reg() |> 
+  set_engine("glm")
+
+rf_mod <- 
+  rand_forest() |> 
+  set_engine("ranger") |> 
+  set_mode("classification")
+```
+### tworzenie workflow 
+```{r}
+ozone_work <- 
+  workflow() |> 
+  add_model(lr_mod) |> 
+  add_recipe(ozone_rec)
+
+ozone_work_lr <- 
+  workflow() |> 
+  add_model(lr_mod) |> 
+  add_recipe(ozone_rec)
+
+ozone_work_rf <- 
+  workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(ozone_rec)
+```
+### trening modelu bez resamplingu
+```{r}
+ozone_fit <-  
+  ozone_work |> 
+  fit(data = train_data)
+```
+
+### wyodrębnianie 
+
+```{r}
+ozone_fit |> 
+  extract_fit_parsnip() |> 
+  tidy() 
+```
+### Predykcja 
+```{r}
+predict(ozone_fit, test_data, type = "prob")
+```
+
+```{r}
+pred_test <- 
+  augment(ozone_fit, test_data) |>
+  select(-wd,
+         -pm10,
+         -pm25,
+         -so2,
+         -co,
+         -no2,
+         -nox,
+         -o3,
+         -ws,
+         -date)
+pred_test
+```
+
+```{r}
+pred_test  |> 
+  roc_curve(truth = ozone, .pred_Niskie) |> 
+  autoplot()
+```
+### Estymacja pola pod krzywą
+```{r}
+pred_test |> 
+  roc_auc(truth = ozone, .pred_Niskie)
+```
+
+## resampling
+
+```{r}
+set.seed(1001)
+ozone_folds_cv <- vfold_cv(train_data, v = 10)
+ozone_folds_5cv <- vfold_cv(train_data, v = 10, repeats = 5)
+ozone_folds_bootstraps <- bootstraps(train_data, times = 5)
+```
+
+### trening modelu z resamplingiem
+
+```{r}
+ozone_fit <-  
+  ozone_work |> 
+  fit(data = train_data)
+```
+
+```{r}
+rf_fit_cv <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_cv)
+
+rf_fit_5cv <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_5cv)
+
+rf_fit_bootstraps <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_bootstraps)
+```
+
+```{r}
+lr_fit_cv <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_cv)
+
+lr_fit_5cv <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_5cv)
+
+lr_fit_bootstraps <- 
+  ozone_work_rf |> 
+  fit_resamples(ozone_folds_bootstraps)
+```
+
+## Wyniki 
+
+### Metryki dla modelu z resamplingiem 
+
+```{r}
+rf_fit_cv |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+```{r}
+rf_fit_5cv |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+```{r}
+rf_fit_bootstraps |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+```{r}
+lr_fit_cv |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+```{r}
+lr_fit_5cv |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+```{r}
+lr_fit_bootstraps |> 
+  collect_metrics() |> 
+  knitr::kable(digits = 3)
+```
+
+### Metryki dla modelu bez resamplingu
+
+```{r}
+bind_rows(
+  pred_test |>
+    roc_auc(truth = ozone, .pred_Niskie),
+  
+  pred_test |>
+    accuracy(truth = ozone, .pred_class)
+) |>
+  knitr::kable(digits = 3)
+```
+
+## Wnioski: 
+
+Dokładność modeli z zastosowaniem metod próbkowania oraz wartość wskaźnika ROC AUC są wyższe niż bez ich użycia.
+Dokładność modelu bez resamplingu wyniosła 0,81 podczas gdy dla wszystkich modeli po resamplingu wynosiła około 0,83 i była najlepsza dla lasu losowego z zastosowaną metodą resamplingu bootstraps oraz dla regresji logistycznej z zastosowaną metodą cv.  
+
+
+
+
+
+
+
+
+
+
+
