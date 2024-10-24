@@ -1,0 +1,164 @@
+--- 
+title: "Ćwiczenie 1.7"
+author: "Kacper Telesz"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: 'Spis Treści'
+    number-sections: true
+    number-depth: 2
+    embed-resources: true
+    html-math-method: mathjax
+    code-tools: true
+    code-block-bg: true
+    code-fold: show
+    code-summary: "Pokaż/ukryj kod"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    citation: true
+    theme: 
+        dark: superhero
+        light: celurean
+    fontsize: 1.1em               
+    linestretch: 1.4
+    
+    highlight-style: dracula
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+---
+
+MRZ - uwagi jak w pierwszym pliku. 
+MRZ- dokument się nie renderuje do html, bo np. nie ma nigdzie wczytanych pakietów 
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(dotwhisker)
+tidymodels_prefer()
+```
+
+
+## Przygotowanie zbioru danych 'airquality':
+
+```{r}
+
+colnames(airquality) <- tolower(colnames(airquality)) # Zmiana nazw kolumn na małe litery
+
+air <- 
+  airquality |> 
+  as_tibble() |> # konwersja na tibble
+  na.omit() |>  # usuwamy brakujące dane
+  select(-day) |> # Usunięcie kolumny 'day'
+  mutate(month = factor(month)) # Zmienna 'month' zostaje przekształcona na zmienną kategoryczną (factor)
+
+str(air) # Sprawdzenie struktury danych
+```
+## Analiza danych 
+
+```{r}
+
+#install.packages("GGally")
+library(GGally)
+
+ggpairs(air[4]) # wizualizacja
+#ggally_autopoint(air)
+
+air %>%
+  ggplot(aes(
+    x = solar.r,
+    y = ozone,
+    col = month,
+    group = month
+  )) +
+  geom_point() +
+  geom_smooth(method = lm, se = F) +
+  scale_color_viridis_d(option = "C", end = .9)
+```
+
+
+## Tworzenie modelu szacującego zawartość ozonu w atmosferze
+
+```{r}
+
+ozone ~ solar.r * wind * temp
+
+linear_reg()
+
+lm_mod <- 
+  linear_reg() |> 
+  set_engine("lm")
+
+lm_fit <-  
+  lm_mod |>
+  fit(ozone ~ solar.r * wind * temp, data = air)
+lm_fit  
+
+lm_fit$fit |> summary()
+lm_fit |> tidy()
+lm_fit |> tidy(conf.int = T)
+```
+
+```{r}
+
+lm_fit |> 
+  tidy() |> 
+  dwplot(vline = geom_vline(xintercept = 0, color = "grey50", linetype = 2), 
+         dot_args = list(size = 2, color = "black"), 
+         whisker_args = list(color = "black")) +
+  theme_bw()
+
+```
+Wnioski: największy wpływ na zawartość o3 w powietrzu ma wiatr, pójźniej temperatura a najmniejszy wpływ ma promieniowanie słoneczne.
+
+## Prognozowanie o3 
+
+```{r}
+new_points <- expand.grid(solar.r = seq(300,400,10), 
+                          wind = seq(5,20,5),
+                          temp = seq(60,90,10))
+```
+
+```{r}
+# Prognoza średniej wartości
+mean_pred <- predict(object = lm_fit, new_data = new_points)
+
+# Prognoza przedizału ufności
+conf_pred <- predict(object = lm_fit, new_data = new_points, type = "conf_int")
+
+# Łączenie danych
+lm_pred <- 
+  new_points |> 
+  bind_cols(mean_pred) |> 
+  bind_cols(conf_pred)
+
+# WYkres danych
+
+```
+
+Za dużo danych na jednym wykresie. Trochę to poprawiłem, ale opisy wykresu  i opis wyników też są potrzben, nikt nie zrozumie co zrobiłeś i po co. 
+
+```{r}
+lm_pred |>
+  ggplot(aes(x = temp,
+             y = .pred, color = factor(wind))) +
+  geom_point(position = position_dodge(width = 5)) +
+  geom_errorbar(aes(ymin = .pred_lower,
+                    ymax = .pred_upper),
+                width = 0.2, 
+                position = position_dodge(width = 5)) +
+  facet_wrap(~ solar.r) +
+  theme_bw() +
+  
+  labs(x = "temperatura[°F]",y = "powietrze",
+  title = "Prognoza stężenia ozonu w zależności od temperatury i prędkości wiatru",
+  color = "p.wiatru[mph]")
+```
+
+Wnioski: Im wyższa temperatura powietrza tym większy wpływ na zawartość ozonu z powietrzu ma prędkość wiatru.
