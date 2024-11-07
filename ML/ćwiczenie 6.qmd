@@ -1,0 +1,312 @@
+---
+title: "Ćwiczenie 6"
+author: "Kacper Telesz"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: 'Spis Treści'
+    number-sections: true
+    number-depth: 2
+    embed-resources: true
+    html-math-method: mathjax
+    code-tools: true
+    code-block-bg: true
+    code-fold: show
+    code-summary: "Pokaż/ukryj kod"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    citation: true
+    theme: 
+        dark: superhero
+        light: celurean
+    fontsize: 1.1em               
+    linestretch: 1.4
+    
+    highlight-style: dracula
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+---
+
+Na podstawie danych mydata (1 rok) zaproponowany został model prognozowania poziomów stężeń O3 (modele regresji). Z zastosowaniem 3 metod:
+
+1. regresja liniowa prosta (glmnet),
+
+2. drzewa decyzyjne (rpart)
+
+3. las losowy (ranger).
+
+## Insertowanie bibliotek
+```{r}
+library(tidymodels) 
+library(skimr) 
+library(GGally) 
+library(openair) 
+library(ranger)
+library(modeldata)
+library(glmnet)
+library(rpart)
+tidymodels_prefer()
+```
+
+
+## Wczytywanie danych
+
+```{r}
+air <- mydata |> selectByDate(year = 1999) 
+air |> skim()
+```
+
+
+```{r}
+air <- air |> na.omit()
+```
+
+
+## Przekształcaenie kuerunku wiatru na zmienną kategoryczną 
+
+```{r}
+air <-
+  air |>
+  mutate(wd = cut(
+    wd,
+    breaks = seq(0, 360, by = 22.5),
+    labels = c("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", 
+                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"),
+    include.lowest = TRUE))
+```
+
+## Podział na zbiór uczący i testowy 
+
+```{r}
+set.seed(222)
+data_split <- initial_split(data = air, prop = 3/4)
+train_data <- training(data_split)
+test_data <-  testing(data_split)
+
+  
+val_set <- validation_split(data = train_data,
+                   prop = 3 / 4,
+                   strata = o3) 
+```
+
+## Model Regresji Liniowej (glmnet)
+
+### Tworzenie modelu
+
+```{r}
+lr_mod <-
+  linear_reg(penalty = tune(),
+              mixture = tune()) |>
+  set_engine(engine = "glmnet",num.threads = parallel::detectCores() - 1) |>
+  set_mode("regression")
+```
+
+### Receptura 
+
+```{r}
+lr_recipe <- recipe(o3 ~ ., data = train_data) |>
+  update_role(date, wd, new_role = "ID") |>
+  step_date(date, features = c("month")) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv()
+#lr_recipe |> summary()
+#lr_recipe |> prep()
+```
+
+### Workflow
+
+```{r}
+lr_workflow <-    
+  workflow() |>    
+  add_model(lr_mod) |>    
+  add_recipe(lr_recipe)
+```
+
+### Optymalizacja Hiperparametrów 
+
+Siatka
+
+```{r}
+# automat 
+lr_grid <- grid_regular(penalty(),mixture(),levels = 10)  
+```
+
+Uczenie i optymalizacja modelu
+
+```{r}
+lr_res <-
+  lr_workflow |>
+  tune_grid(
+    resamples = val_set,
+    grid = lr_grid,
+    control = control_grid(save_pred = TRUE),
+    metrics = metric_set(rsq))
+```
+```{r}
+install.packages('ggthemes')
+```
+
+```{r}
+library(ggthemes)
+
+lr_plot <-
+  lr_res |>
+  collect_metrics() |>
+  ggplot(aes(penalty, mean)) +
+  geom_point(size = 2) +
+  geom_line(linetype = 2) +
+  ylab("RSQ") +
+  scale_x_log10() +
+  geom_text(aes(
+    x = penalty,
+    y = mean + 0.03,
+    label = .config |> stringr::str_sub(20, 21)
+  )) + 
+  ggdark::dark_theme_dark()
+
+lr_plot
+```
+
+## Model Lasu Losowego 
+
+Ile mamy rdzeni do dyspozycji
+```{r}
+cores <- parallel::detectCores()
+```
+
+### Tworzenie modelu
+```{r}
+tidymodels_prefer()
+
+rf_mod <-
+  rand_forest(mtry = tune(),
+              min_n = tune(),
+              trees = 100) |>
+  set_engine(engine = "ranger",
+             num.threads = cores - 1) |>
+  set_mode(mode = "regression")
+```
+
+### Receptura 
+
+```{r}
+rf_recipe <- recipe(o3 ~ ., data = train_data) |>
+  update_role(date, wd, new_role = "ID") |>
+  step_date(date, features = c("month")) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv()
+
+rf_recipe |> summary()
+rf_recipe |> prep()
+```
+
+### Workflow 
+
+```{r}
+rf_workflow <- 
+  workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(rf_recipe)
+```
+
+### Optymalizacja modelu
+
+```{r}
+rf_mod
+```
+
+```{r}
+extract_parameter_set_dials(rf_mod)
+```
+
+```{r}
+set.seed(345)
+rf_res <- 
+  rf_workflow |> 
+  tune_grid(resamples = val_set, 
+            grid = 25,
+            control = control_grid(save_pred = T),
+            metrics = metric_set(rsq))
+```
+
+```{r}
+rf_res |> show_best(n = 5)
+```
+
+```{r}
+autoplot(rf_res) + 
+  geom_line() + 
+  geom_point(size = 2) + 
+  ggdark:::dark_theme_dark()
+```
+```{r}
+rf_best <- 
+  rf_res |> select_best()
+rf_best
+```
+## Model drzew decyzyjnych (rpart)
+
+### Tworzenie modelu
+
+```{r}
+dd_mod <-
+  decision_tree(min_n = tune(),
+              tree_depth = tune(),
+              cost_complexity = tune()) |>
+  set_engine(engine = "rpart",
+             num.threads = cores - 1) |>
+  set_mode(mode = "regression")
+```
+
+### Receptura 
+
+```{r}
+dd_recipe <- recipe(o3 ~ ., data = train_data) |>
+  update_role(date, wd, new_role = "ID") |>
+  step_date(date, features = c("month")) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv()
+#lr_recipe |> summary()
+#lr_recipe |> prep()
+```
+
+### Workflow
+
+```{r}
+dd_workflow <-    
+  workflow() |>    
+  add_model(dd_mod) |>    
+  add_recipe(dd_recipe)
+```
+
+### Optymalizacja Hiperparametrów 
+
+Siatka
+
+```{r}
+# automat 
+dd_grid <- grid_regular(min_n(),tree_depth(),cost_complexity(),levels = 10)  
+```
+
+Uczenie i optymalizacja modelu
+
+```{r}
+dd_res <-
+  lr_workflow |>
+  tune_grid(
+    resamples = val_set,
+    grid = lr_grid,
+    control = control_grid(save_pred = TRUE),
+    metrics = metric_set(rsq))
+```
+
+
+
+
